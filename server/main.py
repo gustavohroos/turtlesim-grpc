@@ -7,14 +7,12 @@ from pydantic import BaseModel
 app = FastAPI()
 
 
-# Modelo para a posição
 class Position(BaseModel):
     x: float
     y: float
 
 
 def get_robot_stub(robot_id: str):
-    # Utiliza o nome do contêiner (ex: robot1 ou robot2) para a resolução DNS no Docker Compose
     channel = grpc.insecure_channel(f"{robot_id}:50051")
     stub = robot_pb2_grpc.RobotServiceStub(channel)
     return stub
