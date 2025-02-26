@@ -10,11 +10,8 @@ RUN pip3 install grpcio grpcio-tools
 
 WORKDIR /app
 COPY robot.proto .
-COPY robot_server.py .
-COPY entrypoint.sh .
-RUN chmod +x entrypoint.sh
+COPY robot.py .
 
 RUN python3 -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. robot.proto
 
-EXPOSE 50051
-ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["python3", "robot.py"]
