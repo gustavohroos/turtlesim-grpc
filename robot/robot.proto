@@ -1,16 +1,36 @@
 syntax = "proto3";
 
-package robot;
+import "google/protobuf/empty.proto";
 
-// Serviço para controlar o robô (turtlesim)
-service RobotService {
-  rpc Start(RobotRequest) returns (RobotResponse) {}
-  rpc Stop(RobotRequest) returns (RobotResponse) {}
-  rpc SetPosition(PositionRequest) returns (RobotResponse) {}
-  rpc GetPosition(GetPositionRequest) returns (PositionResponse) {}
+package pb;
+
+option go_package = "server/models";
+
+message Registration {
+  string robot_id = 1;
 }
 
-message RobotRequest {
+enum CommandType {
+  START = 0;
+  STOP = 1;
+  SET_POSITION = 2;
+  GET_POSITION = 3;
+}
+
+message RobotCommand {
+  CommandType type = 1;
+  float x = 2;
+  float y = 3;
+}
+
+message RobotResponse {
+  bool success = 1;
+  string message = 2;
+  float x = 3;
+  float y = 4;
+}
+
+message RobotCommandRequest {
   string robot_id = 1;
 }
 
@@ -20,16 +40,26 @@ message PositionRequest {
   float y = 3;
 }
 
-message GetPositionRequest {
-  string robot_id = 1;
+message RobotMessage {
+  oneof payload {
+    Registration registration = 1;
+    RobotCommand command = 2;
+    RobotResponse response = 3;
+  }
 }
 
-message RobotResponse {
-  bool success = 1;
-  string message = 2;
+message RobotListResponse {
+  repeated string robot_ids = 1;
 }
 
-message PositionResponse {
-  float x = 1;
-  float y = 2;
+service RobotService {
+  rpc Connect(stream RobotMessage) returns (stream RobotMessage);
+}
+
+service CommandService {
+  rpc Start(RobotCommandRequest) returns (RobotResponse);
+  rpc Stop(RobotCommandRequest) returns (RobotResponse);
+  rpc SetPosition(PositionRequest) returns (RobotResponse);
+  rpc GetPosition(RobotCommandRequest) returns (RobotResponse);
+  rpc ListRobots(google.protobuf.Empty) returns (RobotListResponse);
 }
