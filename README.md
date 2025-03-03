@@ -1,5 +1,13 @@
 # Turtlesim gRPC
 
+## Para rodar o projeto
+
+1. Instale o [Docker](https://docs.docker.com/get-docker/).
+2. Clone o repositório.
+3. Execute o comando `docker-compose up --build` na raiz do projeto.
+4. Para rodar os comandos gRPC, instale o [grpcurl](https://github.com/fullstorydev/grpcurl).
+  
+
 ## Requests possíveis
 1. ListRobots
    - Descrição: Retorna a lista de IDs de todos os robôs conectados.
