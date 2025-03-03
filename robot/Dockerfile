@@ -9,9 +9,11 @@ RUN apt-get update && apt-get install -y \
 RUN pip3 install grpcio grpcio-tools
 
 WORKDIR /app
-COPY robot.proto robot_server.py entrypoint.sh ./
+COPY robot_server.py entrypoint.sh ./
+COPY protobuf/* /app/protobuf/
 RUN chmod +x entrypoint.sh
 
-RUN python3 -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. robot.proto
+RUN mkdir models
+RUN python3 -m grpc_tools.protoc -I=. --python_out=. --grpc_python_out=. ./protobuf/*.proto
 
 CMD ["./entrypoint.sh"]

@@ -30,3 +30,16 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix
     depends_on:
       - server
+
+  robot3:
+    build: ./robot
+    container_name: robot3
+    environment:
+      - ROBOT_ID=robot3
+      - SERVER_ADDRESS=server:50051
+      - ROS_DOMAIN_ID=3
+      - DISPLAY=${DISPLAY}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    depends_on:
+      - server

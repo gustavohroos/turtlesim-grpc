@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+import "protobuf/common.proto";
+
+package pb;
+
+option go_package = "turtlesim-grpc/server/models";
+
+message Registration {
+  string robot_id = 1;
+}
+
+message RobotMessage {
+  oneof payload {
+    Registration registration = 1;
+    RobotCommand command = 2;
+    RobotResponse response = 3;
+  }
+}
+
+service RobotService {
+  rpc Connect(stream RobotMessage) returns (stream RobotMessage);
+}

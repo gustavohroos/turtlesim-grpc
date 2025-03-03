@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v3.21.12
-// source: server/protobuf/robot.proto
+// source: protobuf/command_service.proto
 
 package models
 
@@ -18,102 +18,6 @@ import (
 // is compatible with the grpc package it is being compiled against.
 // Requires gRPC-Go v1.64.0 or later.
 const _ = grpc.SupportPackageIsVersion9
-
-const (
-	RobotService_Connect_FullMethodName = "/pb.RobotService/Connect"
-)
-
-// RobotServiceClient is the client API for RobotService service.
-//
-// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-type RobotServiceClient interface {
-	Connect(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[RobotMessage, RobotMessage], error)
-}
-
-type robotServiceClient struct {
-	cc grpc.ClientConnInterface
-}
-
-func NewRobotServiceClient(cc grpc.ClientConnInterface) RobotServiceClient {
-	return &robotServiceClient{cc}
-}
-
-func (c *robotServiceClient) Connect(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[RobotMessage, RobotMessage], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &RobotService_ServiceDesc.Streams[0], RobotService_Connect_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[RobotMessage, RobotMessage]{ClientStream: stream}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type RobotService_ConnectClient = grpc.BidiStreamingClient[RobotMessage, RobotMessage]
-
-// RobotServiceServer is the server API for RobotService service.
-// All implementations must embed UnimplementedRobotServiceServer
-// for forward compatibility.
-type RobotServiceServer interface {
-	Connect(grpc.BidiStreamingServer[RobotMessage, RobotMessage]) error
-	mustEmbedUnimplementedRobotServiceServer()
-}
-
-// UnimplementedRobotServiceServer must be embedded to have
-// forward compatible implementations.
-//
-// NOTE: this should be embedded by value instead of pointer to avoid a nil
-// pointer dereference when methods are called.
-type UnimplementedRobotServiceServer struct{}
-
-func (UnimplementedRobotServiceServer) Connect(grpc.BidiStreamingServer[RobotMessage, RobotMessage]) error {
-	return status.Errorf(codes.Unimplemented, "method Connect not implemented")
-}
-func (UnimplementedRobotServiceServer) mustEmbedUnimplementedRobotServiceServer() {}
-func (UnimplementedRobotServiceServer) testEmbeddedByValue()                      {}
-
-// UnsafeRobotServiceServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to RobotServiceServer will
-// result in compilation errors.
-type UnsafeRobotServiceServer interface {
-	mustEmbedUnimplementedRobotServiceServer()
-}
-
-func RegisterRobotServiceServer(s grpc.ServiceRegistrar, srv RobotServiceServer) {
-	// If the following call pancis, it indicates UnimplementedRobotServiceServer was
-	// embedded by pointer and is nil.  This will cause panics if an
-	// unimplemented method is ever invoked, so we test this at initialization
-	// time to prevent it from happening at runtime later due to I/O.
-	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
-		t.testEmbeddedByValue()
-	}
-	s.RegisterService(&RobotService_ServiceDesc, srv)
-}
-
-func _RobotService_Connect_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(RobotServiceServer).Connect(&grpc.GenericServerStream[RobotMessage, RobotMessage]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type RobotService_ConnectServer = grpc.BidiStreamingServer[RobotMessage, RobotMessage]
-
-// RobotService_ServiceDesc is the grpc.ServiceDesc for RobotService service.
-// It's only intended for direct use with grpc.RegisterService,
-// and not to be introspected or modified (even as a copy)
-var RobotService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "pb.RobotService",
-	HandlerType: (*RobotServiceServer)(nil),
-	Methods:     []grpc.MethodDesc{},
-	Streams: []grpc.StreamDesc{
-		{
-			StreamName:    "Connect",
-			Handler:       _RobotService_Connect_Handler,
-			ServerStreams: true,
-			ClientStreams: true,
-		},
-	},
-	Metadata: "server/protobuf/robot.proto",
-}
 
 const (
 	CommandService_Start_FullMethodName       = "/pb.CommandService/Start"
@@ -366,5 +270,5 @@ var CommandService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "server/protobuf/robot.proto",
+	Metadata: "protobuf/command_service.proto",
 }

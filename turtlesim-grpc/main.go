@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 	"sync"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -34,43 +34,46 @@ type robotServiceServer struct {
 func (s *robotServiceServer) Connect(stream pb.RobotService_ConnectServer) error {
 	msg, err := stream.Recv()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to receive registration: %v", err)
 	}
 	reg := msg.GetRegistration()
 	if reg == nil {
-		return fmt.Errorf("primeira mensagem deve ser de registro")
+		return fmt.Errorf("first message must be registration")
 	}
 	robotID := reg.RobotId
+
 	conn := &RobotConnection{
 		robotID:    robotID,
 		stream:     stream,
-		responseCh: make(chan *pb.RobotMessage),
+		responseCh: make(chan *pb.RobotMessage, 1),
 	}
-
 	robotConnectionsMu.Lock()
 	robotConnections[robotID] = conn
 	robotConnectionsMu.Unlock()
 
-	log.Printf("Robot %s conectado", robotID)
+	log.Printf("Robot %s connected", robotID)
 
-	go func() {
-		for {
-			msg, err := stream.Recv()
-			if err != nil {
-				log.Printf("Robot %s desconectado: %v", robotID, err)
-				break
-			}
-			if msg.GetResponse() != nil {
-				conn.responseCh <- msg
-			}
-		}
-		robotConnectionsMu.Lock()
-		delete(robotConnections, robotID)
-		robotConnectionsMu.Unlock()
-	}()
+	go handleRobotMessages(robotID, stream, conn)
 
 	<-make(chan struct{})
 	return nil
+}
+
+func handleRobotMessages(robotID string, stream pb.RobotService_ConnectServer, conn *RobotConnection) {
+	for {
+		msg, err := stream.Recv()
+		if err != nil {
+			log.Printf("Robot %s disconnected: %v", robotID, err)
+			break
+		}
+		if msg.GetResponse() != nil {
+			conn.responseCh <- msg
+		}
+	}
+	robotConnectionsMu.Lock()
+	delete(robotConnections, robotID)
+	robotConnectionsMu.Unlock()
+	log.Printf("Cleaned up connection for robot %s", robotID)
 }
 
 func sendCommandToRobot(robotID string, cmd *pb.RobotCommand) (*pb.RobotResponse, error) {
@@ -78,7 +81,7 @@ func sendCommandToRobot(robotID string, cmd *pb.RobotCommand) (*pb.RobotResponse
 	conn, exists := robotConnections[robotID]
 	robotConnectionsMu.RUnlock()
 	if !exists {
-		return nil, fmt.Errorf("robot %s nao conectado", robotID)
+		return nil, fmt.Errorf("robot %s not connected", robotID)
 	}
 
 	msg := &pb.RobotMessage{
@@ -91,14 +94,28 @@ func sendCommandToRobot(robotID string, cmd *pb.RobotCommand) (*pb.RobotResponse
 	err := conn.stream.Send(msg)
 	conn.mu.Unlock()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to send command: %v", err)
 	}
 
-	select {
-	case respMsg := <-conn.responseCh:
-		return respMsg.GetResponse(), nil
-	case <-time.After(5 * time.Second):
-		return nil, fmt.Errorf("timeout aguardando resposta do robot %s", robotID)
+	timeout := 5 * time.Second
+	start := time.Now()
+	for {
+		remaining := timeout - time.Since(start)
+		if remaining <= 0 {
+			return nil, fmt.Errorf("timeout waiting for response from robot %s", robotID)
+		}
+		select {
+		case respMsg := <-conn.responseCh:
+			resp := respMsg.GetResponse()
+			if resp != nil {
+				if resp.Message == "Keep-alive" {
+					continue
+				}
+				return resp, nil
+			}
+		case <-time.After(remaining):
+			return nil, fmt.Errorf("timeout waiting for response from robot %s", robotID)
+		}
 	}
 }
 
@@ -144,14 +161,13 @@ func (s *commandServiceServer) ListRobots(ctx context.Context, _ *emptypb.Empty)
 	for robotID := range robotConnections {
 		robotIDs = append(robotIDs, robotID)
 	}
-
 	return &pb.RobotListResponse{RobotIds: robotIDs}, nil
 }
 
 func main() {
 	lis, err := net.Listen("tcp", ":50051")
 	if err != nil {
-		log.Fatalf("Falha ao escutar: %v", err)
+		log.Fatalf("Failed to listen: %v", err)
 	}
 	grpcServer := grpc.NewServer()
 
@@ -160,8 +176,8 @@ func main() {
 
 	reflection.Register(grpcServer)
 
-	log.Printf("Servidor rodando em %v", lis.Addr())
+	log.Printf("Server running on %v", lis.Addr())
 	if err := grpcServer.Serve(lis); err != nil {
-		log.Fatalf("Falha ao servir: %v", err)
+		log.Fatalf("Failed to serve: %v", err)
 	}
 }
