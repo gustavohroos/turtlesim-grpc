@@ -1,69 +1,61 @@
-#!/usr/bin/env python3
+import grpc
+import time
+import queue
+import threading
 import os
-import subprocess
 import time
 import threading
+import subprocess
+
+import protobuf.robot_service_pb2 as robot_pb2
+import protobuf.robot_service_pb2_grpc as robot_pb2_grpc
+import protobuf.common_pb2 as common_pb2
 
 import rclpy
 from rclpy.node import Node
 from turtlesim.srv import TeleportAbsolute
-from turtlesim.msg import Pose
 from geometry_msgs.msg import Twist
 
-import grpc
-from concurrent import futures
-import robot_pb2
-import robot_pb2_grpc
+SERVER_ADDRESS = os.environ.get("SERVER_ADDRESS", "localhost:50051")
+ROBOT_ID = os.environ.get("ROBOT_ID", "robot1")
 
 
 class RobotTurtle(Node):
     def __init__(self):
         super().__init__("robot_turtle")
-        self.center_x = 5.5
-        self.center_y = 5.5
-        self.radius = 2.0
-        self.v = 1.0
-        self.moving = False
-
-        self._lock = threading.Lock()
         self.cmd_vel_pub = self.create_publisher(Twist, "/turtle1/cmd_vel", 10)
-
         self.teleport_client = self.create_client(
             TeleportAbsolute, "/turtle1/teleport_absolute"
         )
         while not self.teleport_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info("Esperando pelo serviço TeleportAbsolute...")
-
-        self.subscription = self.create_subscription(
-            Pose, "/turtle1/pose", self.pose_callback, 10
-        )
-        self.current_pose = Pose()
+            self.get_logger().info("Waiting for TeleportAbsolute service...")
+        self.moving = False
         self._movement_thread = None
-
-    def pose_callback(self, msg):
-        self.current_pose = msg
+        self.x_center = 5.5
+        self.y_center = 5.5
+        self.radius = 2.0
+        self.speed = 2.0
 
     def start_circle(self):
-        with self._lock:
-            if self.moving:
-                return False
-            req = TeleportAbsolute.Request()
-            req.x = self.center_x + self.radius
-            req.y = self.center_y
-            req.theta = 1.5708
-            future = self.teleport_client.call_async(req)
-            rclpy.spin_until_future_complete(self, future)
-            self.moving = True
-            self._movement_thread = threading.Thread(
-                target=self._publish_circle, daemon=True
-            )
-            self._movement_thread.start()
-            return True
+        if self.moving:
+            return
+        req = TeleportAbsolute.Request()
+        req.x = self.x_center + self.radius
+        req.y = self.y_center
+        req.theta = 1.5708
+        future = self.teleport_client.call_async(req)
+        rclpy.spin_until_future_complete(self, future, timeout_sec=3.0)
+        if not future.done():
+            self.get_logger().error("Teleport service did not complete in time")
+            return
+        self.moving = True
+        self._movement_thread = threading.Thread(target=self._publish_circle)
+        self._movement_thread.start()
 
     def _publish_circle(self):
         twist = Twist()
-        twist.linear.x = self.v
-        twist.angular.z = self.v / self.radius
+        twist.linear.x = self.speed
+        twist.angular.z = self.speed / self.radius
         while self.moving:
             self.cmd_vel_pub.publish(twist)
             time.sleep(0.1)
@@ -72,90 +64,117 @@ class RobotTurtle(Node):
         self.cmd_vel_pub.publish(twist)
 
     def stop_circle(self):
-        with self._lock:
-            if not self.moving:
-                return False
-            self.moving = False
-            if self._movement_thread is not None:
-                self._movement_thread.join()
-                self._movement_thread = None
-            return True
+        self.moving = False
+        if self._movement_thread:
+            self._movement_thread.join()
 
-    def set_center(self, x, y):
-        with self._lock:
-            self.center_x = x
-            self.center_y = y
-            if self.moving:
-                req = TeleportAbsolute.Request()
-                req.x = self.center_x + self.radius
-                req.y = self.center_y
-                req.theta = 1.5708
-                future = self.teleport_client.call_async(req)
-                rclpy.spin_until_future_complete(self, future)
-            return True
+    def set_position(self, x, y):
+        self.x_center = x
+        self.y_center = y
+        req = TeleportAbsolute.Request()
+        req.x = x
+        req.y = y
+        req.theta = 1.5708
+        future = self.teleport_client.call_async(req)
+        rclpy.spin_until_future_complete(self, future)
+
+    def get_position(self):
+        return self.x_center, self.y_center
 
 
-class RobotService(robot_pb2_grpc.RobotServiceServicer):
-    def __init__(self, robot_turtle: RobotTurtle):
-        self.robot_turtle = robot_turtle
-
-    def Start(self, request, context):
-        if self.robot_turtle.start_circle():
-            return robot_pb2.RobotResponse(
-                success=True, message="Movimento circular iniciado"
-            )
-        else:
-            return robot_pb2.RobotResponse(
-                success=False, message="Turtle já está se movendo"
-            )
-
-    def Stop(self, request, context):
-        if self.robot_turtle.stop_circle():
-            return robot_pb2.RobotResponse(
-                success=True, message="Movimento interrompido"
-            )
-        else:
-            return robot_pb2.RobotResponse(
-                success=False, message="Turtle não está em movimento"
-            )
-
-    def SetPosition(self, request, context):
-        if self.robot_turtle.set_center(request.x, request.y):
-            return robot_pb2.RobotResponse(
-                success=True, message="Centro do círculo atualizado"
-            )
-        else:
-            return robot_pb2.RobotResponse(
-                success=False, message="Falha ao atualizar o centro"
-            )
-
-    def GetPosition(self, request, context):
-        pose = self.robot_turtle.current_pose
-        return robot_pb2.PositionResponse(x=pose.x, y=pose.y)
+outgoing_queue = queue.Queue()
 
 
-def serve(robot_id):
+def request_generator():
+    registration = robot_pb2.Registration(robot_id=ROBOT_ID)
+    outgoing_queue.put(robot_pb2.RobotMessage(registration=registration))
+    while True:
+        msg = outgoing_queue.get()
+        yield msg
+
+
+def keep_alive_worker():
+    while True:
+        time.sleep(60)
+        keep_alive = common_pb2.RobotResponse(success=True, message="Keep-alive")
+        outgoing_queue.put(robot_pb2.RobotMessage(response=keep_alive))
+
+
+def run_grpc_client(robot_turtle: RobotTurtle):
+    threading.Thread(target=keep_alive_worker, daemon=True).start()
+
+    with grpc.insecure_channel(SERVER_ADDRESS) as channel:
+        stub = robot_pb2_grpc.RobotServiceStub(channel)
+        responses = stub.Connect(request_generator())
+        for msg in responses:
+            if msg.HasField("command"):
+                cmd = msg.command
+                if cmd.type == common_pb2.CommandType.START:
+                    robot_turtle.get_logger().info("Received START command")
+                    try:
+                        robot_turtle.start_circle()
+                    except Exception as e:
+                        print(e)
+                    response = common_pb2.RobotResponse(
+                        success=True, message="Robot started"
+                    )
+                elif cmd.type == common_pb2.CommandType.STOP:
+                    robot_turtle.get_logger().info("Received STOP command")
+                    try:
+                        robot_turtle.stop_circle()
+                    except Exception as e:
+                        print(e)
+                    response = common_pb2.RobotResponse(
+                        success=True, message="Robot stopped"
+                    )
+                elif cmd.type == common_pb2.CommandType.SET_POSITION:
+                    robot_turtle.get_logger().info(
+                        f"Received SET_POSITION command: x={cmd.x}, y={cmd.y}"
+                    )
+                    try:
+                        robot_turtle.set_position(cmd.x, cmd.y)
+                    except Exception as e:
+                        print(e)
+                    response = common_pb2.RobotResponse(
+                        success=True, message="Position set", x=cmd.x, y=cmd.y
+                    )
+                elif cmd.type == common_pb2.CommandType.GET_POSITION:
+                    robot_turtle.get_logger().info("Received GET_POSITION command")
+                    current_x, current_y = robot_turtle.get_position()
+                    response = common_pb2.RobotResponse(
+                        success=True,
+                        message="Current position",
+                        x=current_x,
+                        y=current_y,
+                    )
+                else:
+                    print("Received unknown command")
+                    response = common_pb2.RobotResponse(
+                        success=False, message="Unknown command"
+                    )
+
+                print("Sending response:", response)
+                outgoing_queue.put(robot_pb2.RobotMessage(response=response))
+
+
+def main():
+    subprocess.Popen(["ros2", "run", "turtlesim", "turtlesim_node"])
+    time.sleep(2)
+
     rclpy.init()
     robot_turtle = RobotTurtle()
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    robot_pb2_grpc.add_RobotServiceServicer_to_server(
-        RobotService(robot_turtle), server
-    )
-    server.add_insecure_port("[::]:50051")
-    server.start()
-    print(f"Servidor gRPC do robô {robot_id} iniciado na porta 50051")
+
+    grpc_thread = threading.Thread(target=run_grpc_client, args=(robot_turtle,))
+    grpc_thread.daemon = True
+    grpc_thread.start()
+
     try:
-        while rclpy.ok():
-            rclpy.spin_once(robot_turtle, timeout_sec=0.1)
-            time.sleep(0.1)
+        rclpy.spin(robot_turtle)
     except KeyboardInterrupt:
-        pass
+        robot_turtle.get_logger().info("Shutting down robot")
     finally:
-        server.stop(0)
-        robot_turtle.destroy_node()
         rclpy.shutdown()
 
 
 if __name__ == "__main__":
-    robot_id = os.environ.get("ROBOT_ID", "robot1")
-    serve(robot_id)
+    main()
